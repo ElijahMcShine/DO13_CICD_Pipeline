@@ -1,0 +1,23 @@
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: $CI_COMMIT_REF_NAME =~ /^feature_.*$/
+      changes:
+      - src/services/**/*
+      when: always
+    - when: never
+
+default:
+  tags:
+    - inst-kuber-runner
+
+stages:
+  - build
+  - test
+  - deploy-stage
+
+include:
+  - 'gitlab-ci/template-build.yml'
+  - 'gitlab-ci/template-test.yml'
+  - 'gitlab-ci/template-stage.yml'

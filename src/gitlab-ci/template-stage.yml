@@ -1,0 +1,92 @@
+deploy-stage:
+  image: docker.io/dtzar/helm-kubectl
+  variables:
+    KUBE_CONTEXT: root/k8s-connection:gitlab-agent
+  stage: deploy-stage
+  when: manual
+  allow_failure: false
+  before_script:
+    - AUTH_B64=$(echo -n "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" | base64)
+    - |
+      cat > docker_cred <<EOF
+      {
+        "auths": {
+          "${HARBOR_HOST}": {
+            "auth": "${AUTH_B64}"
+          }
+        }
+      EOF
+    - echo -n "}" >> docker_cred
+    - |
+      printf '    value: %s' $(cat docker_cred | base64 -w 0) >> build/helm/values.yaml
+  script:
+    - kubectl config use-context "$KUBE_CONTEXT"
+    - cd build/helm/
+    - |
+      if kubectl get namespaces | grep do13-stage
+      then 
+        echo "CI_STAGE_CREATED=false" >> variables.env
+        echo "New stage deploy will not be deployed"
+      else 
+        echo "CI_STAGE_CREATED=true" >> variables.env
+        echo "New stage deploy will be deployed"
+        helm install do13-stage ./ --namespace do13-stage --create-namespace -f values-stage.yaml --take-ownership
+      fi
+  artifacts:
+    reports:
+      dotenv: ./build/helm/variables.env
+
+.update-deploy-image-template:
+  stage: deploy-stage
+  image: docker.io/bitnami/kubectl:latest
+  allow_failure: false
+  when: on_success
+  needs:
+    - job: deploy-stage
+  rules:
+    - changes:
+      - src/services/$SERVICE/**/*
+  variables:
+    KUBE_CONTEXT: root/k8s-connection:gitlab-agent
+  script:
+    - |
+      if [ "$CI_STAGE_CREATED" == "false" ]
+      then 
+        kubectl -n do13-stage rollout restart deploy do13-stage-${SERVICE}-app
+        echo "${SERVICE} was updated"
+      fi
+
+update-deploy-image-booking-service:
+  extends: .update-deploy-image-template
+  variables:
+    SERVICE: booking-service
+
+update-deploy-image-gateway-service:
+  extends: .update-deploy-image-template
+  variables:
+    SERVICE: gateway-service
+
+update-deploy-image-hotel-service:
+  extends: .update-deploy-image-template
+  variables:
+    SERVICE: hotel-service
+
+update-deploy-image-loyalty-service:
+  extends: .update-deploy-image-template
+  variables:
+    SERVICE: loyalty-service
+
+update-deploy-image-payment-service:
+  extends: .update-deploy-image-template
+  variables:
+    SERVICE: payment-service
+
+update-deploy-image-report-service:
+  extends: .update-deploy-image-template
+  variables:
+    SERVICE: report-service
+
+update-deploy-image-session-service:
+  extends: .update-deploy-image-template
+  variables:
+    SERVICE: session-service

@@ -1,0 +1,51 @@
+.build-template:
+  stage: build
+  image: docker:latest
+  rules:
+    - changes:
+      - src/services/${SERVICE}/**/*
+  variables:
+    CI_IMAGE_NAME: "${HARBOR_HOST}/do13build/${SERVICE}"
+  before_script:
+    - TS=${CI_COMMIT_TIMESTAMP}
+    - CI_IMAGE_TAG="${TS:2:1}${TS:3:1}.${TS:5:1}${TS:6:1}.${TS:8:1}${TS:9:1}.${TS:11:1}${TS:12:1}.${TS:14:1}${TS:15:1}"
+    - echo $HARBOR_PASSWORD | docker login -u $HARBOR_USERNAME $HARBOR_HOST --password-stdin
+  script:
+    - docker build -t ${CI_IMAGE_NAME}:${CI_IMAGE_TAG} -t ${CI_IMAGE_NAME}:latest --build-context project=./ --build-arg SERVICE_PATH=./src/services/$SERVICE ./build/service-docker
+    - docker push ${CI_IMAGE_NAME}:${CI_IMAGE_TAG}
+    - docker push ${CI_IMAGE_NAME}:latest
+
+booking-service:
+  extends: .build-template
+  variables:
+    SERVICE: booking-service
+
+gateway-service:
+  extends: .build-template
+  variables:
+    SERVICE: gateway-service
+
+hotel-service:
+  extends: .build-template
+  variables:
+    SERVICE: hotel-service
+
+loyalty-service:
+  extends: .build-template
+  variables:
+    SERVICE: loyalty-service
+
+payment-service:
+  extends: .build-template
+  variables:
+    SERVICE: payment-service
+
+report-service:
+  extends: .build-template
+  variables:
+    SERVICE: report-service
+
+session-service:
+  extends: .build-template
+  variables:
+    SERVICE: session-service

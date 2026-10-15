@@ -1,0 +1,117 @@
+deploy-test:
+  image: docker.io/dtzar/helm-kubectl
+  variables:
+    KUBE_CONTEXT: root/k8s-connection:gitlab-agent
+  stage: test
+  allow_failure: false
+  before_script:
+    - AUTH_B64=$(echo -n "${HARBOR_USERNAME}:${HARBOR_PASSWORD}" | base64)
+    - |
+      cat > docker_cred <<EOF
+      {
+        "auths": {
+          "${HARBOR_HOST}": {
+            "auth": "${AUTH_B64}"
+          }
+        }
+      EOF
+    - echo -n "}" >> docker_cred
+    - |
+      printf '    value: %s' $(cat docker_cred | base64 -w 0) >> build/helm/values.yaml
+  script:
+    - kubectl config use-context "$KUBE_CONTEXT"
+    - cd build/helm/
+    - helm install do13-test-${CI_PIPELINE_ID} --namespace do13-test-${CI_PIPELINE_ID} --create-namespace -f values-test.yaml ./
+
+postman-test:
+  stage: test
+  image: docker.io/postman/newman
+  needs:
+    - job: deploy-test
+  when: delayed
+  start_in: 2 minutes
+  script:
+#    - sleep 100
+    - newman run build/application_tests.postman_collection.json --env-var GATEWAY_HOST=do13-test-gateway-service-svc.do13-test-${CI_PIPELINE_ID}.svc --env-var USERS_HOST=do13-test-session-service-svc.do13-test-${CI_PIPELINE_ID}.svc --delay-request=1000 -r cli,junit --reporter-junit-export ./report.xml
+#    - newman run build/application_tests.postman_collection.json --env-var GATEWAY_HOST=service-svc.do13-test-${CI_PIPELINE_ID}.svc --env-var USERS_HOST=do13-test-session-service-svc.do13-test-${CI_PIPELINE_ID}.svc --delay-request=1000 -r cli,junit --reporter-junit-export ./report.xml
+  artifacts:
+    when: always
+    paths:
+      - report.xml
+    reports:
+      junit: report.xml
+    expire_in: 10 days
+
+remove-test:
+  image: docker.io/dtzar/helm-kubectl
+  allow_failure: true
+  stage: test
+  when: always
+  needs:
+    - job: postman-test
+  variables:
+    KUBE_CONTEXT: root/k8s-connection:gitlab-agent
+  script:
+    - kubectl config use-context "$KUBE_CONTEXT"
+    - cd build/helm/
+    - helm uninstall do13-test-${CI_PIPELINE_ID} --namespace do13-test-${CI_PIPELINE_ID}
+    - kubectl delete namespace do13-test-${CI_PIPELINE_ID}
+
+.load-stage-images-template:
+  stage: test
+  image: docker:latest
+  allow_failure: false
+  when: on_success
+  needs:
+    - job: postman-test
+  rules:
+    - changes:
+      - src/services/$SERVICE/**/*
+  variables:
+    CI_IMAGE_NAME: "${HARBOR_HOST}/do13build/${SERVICE}"
+    CI_STAGE_IMAGE_NAME: "${HARBOR_HOST}/do13stage/${SERVICE}"
+  before_script:
+    - TS=${CI_COMMIT_TIMESTAMP}
+    - CI_IMAGE_TAG="${TS:2:1}${TS:3:1}.${TS:5:1}${TS:6:1}.${TS:8:1}${TS:9:1}.${TS:11:1}${TS:12:1}.${TS:14:1}${TS:15:1}"
+    - echo $HARBOR_PASSWORD | docker login -u $HARBOR_USERNAME $HARBOR_HOST --password-stdin
+  script:
+    - docker pull ${CI_IMAGE_NAME}:${CI_IMAGE_TAG}
+    - docker tag ${CI_IMAGE_NAME}:${CI_IMAGE_TAG} ${CI_STAGE_IMAGE_NAME}:${CI_IMAGE_TAG}
+    - docker push ${CI_STAGE_IMAGE_NAME}:${CI_IMAGE_TAG}
+    - docker tag ${CI_STAGE_IMAGE_NAME}:${CI_IMAGE_TAG} ${CI_STAGE_IMAGE_NAME}:latest
+    - docker push ${CI_STAGE_IMAGE_NAME}:latest
+
+load-stage-image-booking-service:
+  extends: .load-stage-images-template
+  variables:
+    SERVICE: booking-service
+
+load-stage-image-gateway-service:
+  extends: .load-stage-images-template
+  variables:
+    SERVICE: gateway-service
+
+load-stage-image-hotel-service:
+  extends: .load-stage-images-template
+  variables:
+    SERVICE: hotel-service
+
+load-stage-image-loyalty-service:
+  extends: .load-stage-images-template
+  variables:
+    SERVICE: loyalty-service
+
+load-stage-image-payment-service:
+  extends: .load-stage-images-template
+  variables:
+    SERVICE: payment-service
+
+load-stage-image-report-service:
+  extends: .load-stage-images-template
+  variables:
+    SERVICE: report-service
+
+load-stage-image-session-service:
+  extends: .load-stage-images-template
+  variables:
+    SERVICE: session-service
